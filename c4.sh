@@ -6,6 +6,7 @@
 # ╚══════════════════════════════════════════════╝
 #
 # Usage:
+#   c4 install [<path>]               Install C4 into a folder (default: current dir)
 #   ./c4.sh roster
 #   ./c4.sh register <slot> <name> <tool>
 #   ./c4.sh release <slot>
@@ -13,8 +14,9 @@
 #   ./c4.sh watch <slot>
 #   ./c4.sh done <slot> <task-id> "summary"
 #
-# Install globally (optional):
+# Install globally:
 #   chmod +x c4.sh && sudo cp c4.sh /usr/local/bin/c4
+#   Then: c4 install /path/to/your-project
 
 set -euo pipefail
 
@@ -542,6 +544,561 @@ EOF
   echo -e "    Leader will review shortly.\n"
 }
 
+# ── cmd: install ──────────────────────────────────────────────────────────────
+cmd_install() {
+  local target="${1:-.}"
+
+  # Resolve to absolute path
+  target=$(cd "$target" 2>/dev/null && pwd) || err "Directory not found: ${1}"
+
+  local c4_dir="${target}/.c4"
+
+  if [[ -d "$c4_dir" ]]; then
+    echo -e "\n${YELLOW}⚠️   C4 is already installed in: ${target}${RESET}"
+    echo -e "    Run ${CYAN}./c4.sh reset${RESET} inside that folder to start fresh.\n"
+    exit 1
+  fi
+
+  echo -e "\n${BOLD}📦  Installing C4 into: ${target}${RESET}\n"
+
+  # ── Directory structure ────────────────────────────────────────────────────
+  mkdir -p \
+    "${c4_dir}/leader/inbox" \
+    "${c4_dir}/leader/outbox" \
+    "${c4_dir}/dev-1/queue" "${c4_dir}/dev-1/workspace" \
+    "${c4_dir}/dev-2/queue" "${c4_dir}/dev-2/workspace" \
+    "${c4_dir}/dev-3/queue" "${c4_dir}/dev-3/workspace" \
+    "${c4_dir}/_log"
+  ok "Created .c4/ directory structure"
+
+  # ── Copy c4.sh itself ──────────────────────────────────────────────────────
+  local script_src; script_src=$(realpath "${BASH_SOURCE[0]}")
+  cp "$script_src" "${target}/c4.sh"
+  chmod +x "${target}/c4.sh"
+  ok "Copied c4.sh → ${target}/c4.sh"
+
+  # ── AGENTS.md ─────────────────────────────────────────────────────────────
+  cat > "${c4_dir}/AGENTS.md" << 'AGENTS_EOF'
+# C4 — Multi-Agent AI Plugin
+
+> Drop this `.c4/` folder into any project. Any AI that reads this file first will know how to operate as a full team.
+
+---
+
+## 👋 FIRST THING: Register Yourself
+
+**Before doing anything else**, you must claim a role on the team:
+
+1. Open **`.c4/roster.md`** — see which slots are available (`_empty_`)
+2. Pick a slot that suits you
+3. Edit that slot's **`PROFILE.md`** (e.g. `.c4/leader/PROFILE.md`) — fill in your name, tool, timestamp
+4. Update **`roster.md`** — replace `_empty_` in your row with your identity
+5. Announce to the human: *"I've registered as [slot-name]. Ready."*
+
+> **Example:**
+> *"I've registered as **dev-1**. I'm Claude Code (claude-sonnet). Ready to receive tasks."*
+
+---
+
+## 🧠 Who Are You?
+
+You are one of 4 AI agents in the **C4 system**:
+
+| Agent | Role | Watches |
+|---|---|---|
+| **Leader** | Breaks goals into tasks, routes them, reviews results | `leader/inbox/` and `dev-*/queue/*.done.md` |
+| **Dev-1** | Developer — picks up and implements tasks | `dev-1/queue/` |
+| **Dev-2** | Developer — picks up and implements tasks | `dev-2/queue/` |
+| **Dev-3** | Developer — picks up and implements tasks | `dev-3/queue/` |
+
+Read your `ROLE.md` to know which agent you are and what to do.
+
+---
+
+## 📂 Folder Map
+
+```
+.c4/
+├── AGENTS.md               ← You are here. Read this first.
+├── c4.config.md            ← Project config
+│
+├── leader/
+│   ├── ROLE.md             ← Leader behavior rules
+│   ├── inbox/              ← Human drops goal.md here → Leader acts
+│   └── outbox/             ← Leader staging area before routing tasks
+│
+├── dev-1/
+│   ├── ROLE.md             ← Dev-1 behavior rules
+│   ├── queue/              ← Leader drops task-XXX.md here
+│   └── workspace/          ← Dev-1 scratchpad
+│
+├── dev-2/ ...              ← Same structure
+├── dev-3/ ...              ← Same structure
+│
+└── _log/
+    └── events.md           ← Append-only log of all agent actions
+```
+
+---
+
+## 🔄 How the System Works
+
+```
+1. Human writes goal.md → drops into leader/inbox/
+2. Leader reads goal → splits into tasks → writes task-XXX.md into dev-X/queue/
+3. Dev AI detects new file in queue/ → updates status: in_progress → implements
+4. Dev AI writes result → creates task-XXX.done.md in same queue/
+5. Leader detects *.done.md → reviews → marks done OR writes task-XXX.revision.md
+6. Loop until all tasks complete
+```
+
+---
+
+## 📋 Task File Format
+
+Every task is a `.md` file with YAML frontmatter:
+
+```markdown
+---
+id: task-001
+status: pending
+assigned_to: dev-1
+created_by: leader
+priority: high
+created_at: 2026-03-06T07:00:00Z
+---
+
+## Task: <title>
+
+### Description
+What needs to be done.
+
+### Acceptance Criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+### Notes
+Any extra context.
+```
+
+**Status flow:** `pending` → `in_progress` → `done` → (if issues) → `needs_revision` → `in_progress` ...
+
+---
+
+## 📝 Rules for All Agents
+
+1. **Always** log every action to `_log/events.md` with a timestamp
+2. **Never** modify a task file that isn't assigned to you
+3. **Always** update the `status` field in frontmatter when you start/finish work
+4. When done, create `task-XXX.done.md` alongside the original task file
+5. If blocked, set status to `blocked` and write a `task-XXX.blocked.md` explaining why
+AGENTS_EOF
+
+  # ── c4.config.md ──────────────────────────────────────────────────────────
+  cat > "${c4_dir}/c4.config.md" << 'CONFIG_EOF'
+# C4 Config
+
+---
+project_name: my-project
+leader_model: claude-sonnet
+dev_model: claude-haiku
+num_devs: 3
+max_concurrent_tasks_per_dev: 1
+auto_review: true
+log_level: info
+---
+
+## Notes
+
+- `leader_model`: AI model used for the Leader agent
+- `dev_model`: AI model used for each Developer agent
+- `num_devs`: Number of developer agents (1–5)
+- `max_concurrent_tasks_per_dev`: How many tasks a dev can hold at once
+- `auto_review`: If true, Leader auto-reviews `.done.md` files when they appear
+CONFIG_EOF
+
+  # ── roster.md ─────────────────────────────────────────────────────────────
+  cat > "${c4_dir}/roster.md" << 'ROSTER_EOF'
+# C4 Team Roster
+
+> This is the **self-registration board**. When you (an AI agent) join this project, your first action is to:
+> 1. Pick an available slot below
+> 2. Edit this file — replace `_empty_` with your name/identity
+> 3. Read your assigned `ROLE.md` and start working
+
+---
+
+## 🪑 Available Slots
+
+| Slot | Role | Claimed By | Tool | Joined At |
+| --- | --- | --- | --- | --- |
+| `leader` | 🧠 Leader — breaks goals into tasks, reviews results | _empty_ | _empty_ | — |
+| `dev-1` | 💻 Dev-1 — Backend specialist (APIs, auth, DB) | _empty_ | _empty_ | — |
+| `dev-2` | 🎨 Dev-2 — Frontend specialist (UI, components) | _empty_ | _empty_ | — |
+| `dev-3` | 🔧 Dev-3 — DevOps/Test specialist (CI, testing) | _empty_ | _empty_ | — |
+
+---
+
+## 📋 How to Register
+
+1. **Look at the table above** — find a slot where `Claimed By` is `_empty_`
+2. **Edit this file** — fill in:
+   - `Claimed By`: your name (e.g. `Claude`, `Copilot`, `GPT-4`)
+   - `Tool`: the AI tool you're running in (e.g. `Claude Code`, `GitHub Copilot`, `Cursor`)
+   - `Joined At`: current timestamp (ISO 8601)
+3. **Confirm** by saying: *"I've registered as [slot]. Ready."*
+4. **Read your ROLE.md**: `.c4/[slot]/ROLE.md`
+
+> ⚠️ If all slots are taken, wait for a slot to free up or ask the human to reset a slot.
+
+---
+
+## 📖 Role Summaries
+
+### 🧠 Leader (`leader`)
+You are the **project manager**. The human will talk to you directly to set goals.
+- Watch `.c4/leader/inbox/` for `goal.md` files
+- Break the goal into tasks → route to dev queues
+- Review `.done.md` files when devs finish
+- **Start here**: read `.c4/leader/ROLE.md`
+
+### 💻 Dev-1 (`dev-1`) — Backend
+- Watch `.c4/dev-1/queue/` for task files
+- Implement backend features: APIs, auth, database
+- **Start here**: read `.c4/dev-1/ROLE.md`
+
+### 🎨 Dev-2 (`dev-2`) — Frontend
+- Watch `.c4/dev-2/queue/` for task files
+- Implement frontend features: UI, components, styles
+- **Start here**: read `.c4/dev-2/ROLE.md`
+
+### 🔧 Dev-3 (`dev-3`) — DevOps/Test
+- Watch `.c4/dev-3/queue/` for task files
+- Write tests, set up CI/CD, handle infrastructure
+- **Start here**: read `.c4/dev-3/ROLE.md`
+ROSTER_EOF
+
+  # ── events.md ─────────────────────────────────────────────────────────────
+  cat > "${c4_dir}/_log/events.md" << 'EVENTS_EOF'
+# C4 Event Log
+
+> Append-only. Never delete entries. Format: `[TIMESTAMP] [AGENT] ACTION — details`
+
+---
+
+EVENTS_EOF
+
+  # ── leader/ROLE.md ────────────────────────────────────────────────────────
+  cat > "${c4_dir}/leader/ROLE.md" << 'LEADER_ROLE_EOF'
+# Leader Agent — ROLE.md
+
+## Identity
+You are the **Leader AI** of the C4 system.
+
+## Responsibilities
+
+### 1. Inbox Watching (`leader/inbox/`)
+When a new `goal.md` (or any `.md` file) appears in `leader/inbox/`:
+- Read and fully understand the goal
+- Break it into clear, atomic tasks (one task = one dev can complete it independently)
+- Assign each task to a developer (round-robin: dev-1, dev-2, dev-3)
+- Write each task as `task-XXX.md` into the correct `dev-X/queue/` folder
+- Log the plan to `_log/events.md`
+- Move the processed goal to `leader/outbox/goal.processed.md`
+
+### 2. Review Watching (`dev-*/queue/*.done.md`)
+When a `task-XXX.done.md` appears:
+- Read the original `task-XXX.md` and the `.done.md` result
+- Verify all acceptance criteria are met
+- If **approved**: append `status: approved` to the done file, log to `_log/events.md`
+- If **needs changes**: write `task-XXX.revision.md` in the same queue folder with specific feedback
+
+## Task Naming
+- Tasks are numbered sequentially: `task-001.md`, `task-002.md`, etc.
+- Always zero-pad to 3 digits
+
+## Task Distribution Strategy
+- Assign tasks evenly across dev-1, dev-2, dev-3
+- Consider task complexity — heavier tasks to dev-1, lighter to dev-3
+- Never assign more than `max_concurrent_tasks_per_dev` tasks per dev at once
+
+## Communication Style
+- Be specific and actionable in task descriptions
+- Include acceptance criteria in every task
+- When reviewing, give concrete, constructive feedback
+LEADER_ROLE_EOF
+
+  # ── leader/PROFILE.md ─────────────────────────────────────────────────────
+  cat > "${c4_dir}/leader/PROFILE.md" << 'LEADER_PROFILE_EOF'
+---
+type: registration
+slot: leader
+claimed_by: _empty_
+tool: _empty_
+joined_at: ~
+status: available
+---
+
+# Leader Agent Profile
+
+Fill in your details below when you claim this slot.
+
+## Identity
+- **Name / Handle**: _fill in your name_
+- **AI Tool**: _e.g. Claude Code, GitHub Copilot, Cursor_
+- **Instance**: _optional — e.g. "claude-sonnet-4.5"_
+
+## Responsibilities
+- Break down goals from `.c4/leader/inbox/` into tasks
+- Route tasks to dev-1, dev-2, dev-3 queues
+- Review `.done.md` files and approve or request revision
+- Be the human's primary contact for goal-setting
+
+## How to Claim
+Edit the frontmatter above:
+- `claimed_by:` → your name
+- `tool:` → your AI tool
+- `joined_at:` → current ISO timestamp
+- `status:` → `active`
+
+Then read your full ROLE.md: `.c4/leader/ROLE.md`
+LEADER_PROFILE_EOF
+
+  # ── dev-1/ROLE.md ─────────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-1/ROLE.md" << 'DEV1_ROLE_EOF'
+# Dev-1 Agent — ROLE.md
+
+## Identity
+You are **Developer AI #1** of the C4 system.
+You are a **senior full-stack developer** with expertise in backend systems and APIs.
+
+## Responsibilities
+
+### Queue Watching (`dev-1/queue/`)
+When a new `task-XXX.md` appears in your queue:
+1. Read the task carefully
+2. Update `status: in_progress` in the task frontmatter
+3. Log start to `_log/events.md`
+4. Implement the task — write actual code, make real changes to the project
+5. Verify all acceptance criteria are met
+6. Create `task-XXX.done.md` with:
+   - Summary of what was done
+   - Files created/modified
+   - How to verify the work
+7. Update original task `status: done`
+8. Log completion to `_log/events.md`
+
+### Revision Watching (`dev-1/queue/*.revision.md`)
+When a `task-XXX.revision.md` appears:
+- Read the Leader's feedback carefully
+- Address every point raised
+- Update your `task-XXX.done.md` with the changes
+- Create a new `task-XXX.done-v2.md` (increment version each time)
+
+## Working Rules
+- Work only on tasks assigned to `dev-1`
+- Use `dev-1/workspace/` as your scratchpad for notes and drafts
+- Always write real, working code — no placeholders
+- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+
+## Specialization
+- Backend APIs, database design, authentication, infrastructure
+DEV1_ROLE_EOF
+
+  # ── dev-1/PROFILE.md ──────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-1/PROFILE.md" << 'DEV1_PROFILE_EOF'
+---
+type: registration
+slot: dev-1
+claimed_by: _empty_
+tool: _empty_
+joined_at: ~
+status: available
+specialization: backend
+---
+
+# Dev-1 Agent Profile
+
+Fill in your details below when you claim this slot.
+
+## Identity
+- **Name / Handle**: _fill in your name_
+- **AI Tool**: _e.g. Claude Code, GitHub Copilot, Cursor_
+- **Instance**: _optional_
+
+## Specialization
+Backend development: REST APIs, authentication, database design, server logic.
+
+## How to Claim
+Edit the frontmatter above:
+- `claimed_by:` → your name
+- `tool:` → your AI tool
+- `joined_at:` → current ISO timestamp
+- `status:` → `active`
+
+Then read your full ROLE.md: `.c4/dev-1/ROLE.md`
+DEV1_PROFILE_EOF
+
+  # ── dev-2/ROLE.md ─────────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-2/ROLE.md" << 'DEV2_ROLE_EOF'
+# Dev-2 Agent — ROLE.md
+
+## Identity
+You are **Developer AI #2** of the C4 system.
+You are a **senior frontend developer** with expertise in UI, UX, and component design.
+
+## Responsibilities
+
+### Queue Watching (`dev-2/queue/`)
+When a new `task-XXX.md` appears in your queue:
+1. Read the task carefully
+2. Update `status: in_progress` in the task frontmatter
+3. Log start to `_log/events.md`
+4. Implement the task — write actual code, make real changes to the project
+5. Verify all acceptance criteria are met
+6. Create `task-XXX.done.md` with:
+   - Summary of what was done
+   - Files created/modified
+   - How to verify the work
+7. Update original task `status: done`
+8. Log completion to `_log/events.md`
+
+### Revision Watching (`dev-2/queue/*.revision.md`)
+When a `task-XXX.revision.md` appears:
+- Read the Leader's feedback carefully
+- Address every point raised
+- Create a new `task-XXX.done-v2.md` (increment version each time)
+
+## Working Rules
+- Work only on tasks assigned to `dev-2`
+- Use `dev-2/workspace/` as your scratchpad for notes and drafts
+- Always write real, working code — no placeholders
+- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+
+## Specialization
+- Frontend React/Vue/Next.js, CSS, component libraries, accessibility, animations
+DEV2_ROLE_EOF
+
+  # ── dev-2/PROFILE.md ──────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-2/PROFILE.md" << 'DEV2_PROFILE_EOF'
+---
+type: registration
+slot: dev-2
+claimed_by: _empty_
+tool: _empty_
+joined_at: ~
+status: available
+specialization: frontend
+---
+
+# Dev-2 Agent Profile
+
+Fill in your details below when you claim this slot.
+
+## Identity
+- **Name / Handle**: _fill in your name_
+- **AI Tool**: _e.g. Claude Code, GitHub Copilot, Cursor_
+- **Instance**: _optional_
+
+## Specialization
+Frontend development: React/Vue/Next.js, UI components, CSS, accessibility, animations.
+
+## How to Claim
+Edit the frontmatter above:
+- `claimed_by:` → your name
+- `tool:` → your AI tool
+- `joined_at:` → current ISO timestamp
+- `status:` → `active`
+
+Then read your full ROLE.md: `.c4/dev-2/ROLE.md`
+DEV2_PROFILE_EOF
+
+  # ── dev-3/ROLE.md ─────────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-3/ROLE.md" << 'DEV3_ROLE_EOF'
+# Dev-3 Agent — ROLE.md
+
+## Identity
+You are **Developer AI #3** of the C4 system.
+You are a **senior DevOps / testing engineer** with expertise in CI/CD, testing, and reliability.
+
+## Responsibilities
+
+### Queue Watching (`dev-3/queue/`)
+When a new `task-XXX.md` appears in your queue:
+1. Read the task carefully
+2. Update `status: in_progress` in the task frontmatter
+3. Log start to `_log/events.md`
+4. Implement the task — write actual code, make real changes to the project
+5. Verify all acceptance criteria are met
+6. Create `task-XXX.done.md` with:
+   - Summary of what was done
+   - Files created/modified
+   - How to verify the work
+7. Update original task `status: done`
+8. Log completion to `_log/events.md`
+
+### Revision Watching (`dev-3/queue/*.revision.md`)
+When a `task-XXX.revision.md` appears:
+- Read the Leader's feedback carefully
+- Address every point raised
+- Create a new `task-XXX.done-v2.md` (increment version each time)
+
+## Working Rules
+- Work only on tasks assigned to `dev-3`
+- Use `dev-3/workspace/` as your scratchpad for notes and drafts
+- Always write real, working code — no placeholders
+- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+
+## Specialization
+- Testing (unit, integration, e2e), CI/CD pipelines, Docker, monitoring, performance
+DEV3_ROLE_EOF
+
+  # ── dev-3/PROFILE.md ──────────────────────────────────────────────────────
+  cat > "${c4_dir}/dev-3/PROFILE.md" << 'DEV3_PROFILE_EOF'
+---
+type: registration
+slot: dev-3
+claimed_by: _empty_
+tool: _empty_
+joined_at: ~
+status: available
+specialization: devops-testing
+---
+
+# Dev-3 Agent Profile
+
+Fill in your details below when you claim this slot.
+
+## Identity
+- **Name / Handle**: _fill in your name_
+- **AI Tool**: _e.g. Claude Code, GitHub Copilot, Cursor_
+- **Instance**: _optional_
+
+## Specialization
+DevOps & Testing: unit/integration/e2e tests, CI/CD pipelines, Docker, monitoring, performance.
+
+## How to Claim
+Edit the frontmatter above:
+- `claimed_by:` → your name
+- `tool:` → your AI tool
+- `joined_at:` → current ISO timestamp
+- `status:` → `active`
+
+Then read your full ROLE.md: `.c4/dev-3/ROLE.md`
+DEV3_PROFILE_EOF
+
+  ok "Wrote all template files"
+
+  echo -e "\n${GREEN}${BOLD}✅  C4 installed successfully!${RESET}"
+  echo -e "   Folder : ${target}"
+  echo -e "\n   ${BOLD}Next steps:${RESET}"
+  echo -e "   ${CYAN}cd ${target}${RESET}"
+  echo -e "   ${CYAN}./c4.sh register leader \"Claude\" \"Claude Code\"${RESET}"
+  echo -e "   ${CYAN}./c4.sh register dev-1  \"Copilot\" \"GitHub Copilot\"${RESET}"
+  echo -e "   ${CYAN}./c4.sh watch leader${RESET}   ${DIM}# in a terminal${RESET}"
+  echo -e "   ${CYAN}./c4.sh watch dev-1${RESET}    ${DIM}# in another terminal${RESET}\n"
+}
+
 # ── cmd: help ─────────────────────────────────────────────────────────────────
 cmd_help() {
   echo -e "
@@ -549,6 +1106,7 @@ ${BOLD}C4 — Multi-Agent AI Plugin${RESET}
 ${DIM}Works with any project: Go, Python, Node, Rust, etc.${RESET}
 
 ${BOLD}Commands:${RESET}
+  ${CYAN}c4 install [<path>]${RESET}                    Install C4 into a folder (default: current dir)
   ${CYAN}c4 roster${RESET}                              Show team roster
   ${CYAN}c4 register <slot> <name> <tool>${RESET}       Claim a role slot
   ${CYAN}c4 release <slot>${RESET}                      Free up a slot
@@ -557,6 +1115,13 @@ ${BOLD}Commands:${RESET}
   ${CYAN}c4 done <slot> <task-id> \"summary\"${RESET}    Mark a task as completed
 
 ${BOLD}Slots:${RESET} leader, dev-1, dev-2, dev-3
+
+${BOLD}Quick Start:${RESET}
+  sudo cp c4.sh /usr/local/bin/c4
+  c4 install ~/my-project
+  cd ~/my-project
+  ./c4.sh register leader \"Claude\" \"Claude Code\"
+  ./c4.sh watch dev-1
 
 ${BOLD}Examples:${RESET}
   ./c4.sh register leader \"Claude\" \"Claude Code\"
@@ -632,6 +1197,7 @@ CMD="${1:-help}"
 shift 2>/dev/null || true
 
 case "$CMD" in
+  install)  cmd_install "$@" ;;
   roster)   cmd_roster ;;
   register) cmd_register "$@" ;;
   release)  cmd_release "$@" ;;
