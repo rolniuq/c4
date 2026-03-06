@@ -1,0 +1,6 @@
+*.tmp
+.c4/_log/events.md
+.c4/leader/inbox/*.md
+.c4/leader/outbox/*.md
+.c4/dev-*/queue/*.md
+.c4/dev-*/workspace/
