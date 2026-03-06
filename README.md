@@ -24,29 +24,36 @@ All communication happens via `.md` files with YAML frontmatter. Every action is
 
 ---
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rolniuq/c4/main/c4.sh | sudo tee /usr/local/bin/c4 > /dev/null && sudo chmod +x /usr/local/bin/c4
+```
+
+That's it. No clone needed.
+
+---
+
 ## Quick Start
 
 ```bash
-# 1. Install c4 globally
-sudo cp c4.sh /usr/local/bin/c4
-
-# 2. Install into any project with one command
+# Install C4 into any project with one command
 c4 install ~/your-project
 
-# 3. Register your AI agents
+# Register your AI agents
 cd ~/your-project
 ./c4.sh register leader "Claude" "Claude Code"
 ./c4.sh register dev-1  "Copilot" "GitHub Copilot"
 ./c4.sh register dev-2  "Claude" "Cursor"
 
-# 4. Each Dev AI starts watching (run in separate terminals)
+# Each Dev AI starts watching (run in separate terminals)
 ./c4.sh watch dev-1   # Terminal 2
 ./c4.sh watch dev-2   # Terminal 3
 
-# 5. Leader watches and receives your goal
+# Leader watches and receives your goal
 ./c4.sh watch leader  # Terminal 1 — then drop a goal.md
 
-# 6. When task is done
+# When task is done
 ./c4.sh done dev-1 task-001 "implemented GET /health in main.go"
 ```
 
@@ -139,7 +146,7 @@ When a task appears in your terminal, implement it, then run:
 ## Install Globally
 
 ```bash
-sudo cp c4.sh /usr/local/bin/c4
+curl -fsSL https://raw.githubusercontent.com/rolniuq/c4/main/c4.sh | sudo tee /usr/local/bin/c4 > /dev/null && sudo chmod +x /usr/local/bin/c4
 
 # Now install C4 into any project with one command:
 c4 install ~/path/to/your-project
