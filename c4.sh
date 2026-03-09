@@ -1099,6 +1099,49 @@ DEV3_PROFILE_EOF
   echo -e "   ${CYAN}./c4.sh watch dev-1${RESET}    ${DIM}# in another terminal${RESET}\n"
 }
 
+# ── cmd: init ─────────────────────────────────────────────────────────────────
+cmd_init() {
+  local slot="${1:-}"
+  
+  [[ -n "$slot" ]] || err "Usage: c4 init <slot>  (slots: ${VALID_SLOTS[*]})"
+  is_valid_slot "$slot" || err "Invalid slot: $slot. Choose from: ${VALID_SLOTS[*]}"
+  
+  local role_file="${C4_DIR}/${slot}/ROLE.md"
+  local profile_file="${C4_DIR}/${slot}/PROFILE.md"
+  
+  [[ -f "$role_file" ]] || err "ROLE.md not found: $role_file"
+  
+  local role_content; role_content=$(cat "$role_file")
+  local profile_content; profile_content=$(cat "$profile_file")
+  
+  echo -e "
+${CYAN}╔════════════════════════════════════════════════════════════════╗${RESET}
+${CYAN}║  C4 AGENT INITIALIZATION — ${slot}${RESET}$(printf ' %.0s' {1..30})${CYAN}║${RESET}
+${CYAN}╚════════════════════════════════════════════════════════════════╝${RESET}
+
+${YELLOW}📋 COPY THE CONTENT BELOW AND PASTE INTO YOUR AI ASSISTANT:${RESET}
+
+---
+
+# C4 Agent — ${slot}
+
+> When you read this, you are now acting as the **${slot}** agent in the C4 multi-agent system.
+
+## 📂 Your Profile
+${profile_content}
+
+## 📜 Your Role Rules
+${role_content}
+
+---
+
+${YELLOW}📋 VERIFICATION:${RESET}
+After reading this, respond with: \"I've registered as ${slot}. Ready.\"
+
+${GREEN}✅ END OF PROMPT — COPY EVERYTHING ABOVE${RESET}
+"
+}
+
 # ── cmd: help ─────────────────────────────────────────────────────────────────
 cmd_help() {
   echo -e "
@@ -1109,6 +1152,7 @@ ${BOLD}Commands:${RESET}
   ${CYAN}c4 install [<path>]${RESET}                    Install C4 into a folder (default: current dir)
   ${CYAN}c4 roster${RESET}                              Show team roster
   ${CYAN}c4 register <slot> <name> <tool>${RESET}       Claim a role slot
+  ${CYAN}c4 init <slot>${RESET}                         Output role prompt (copy to AI assistant)
   ${CYAN}c4 release <slot>${RESET}                      Free up a slot
   ${CYAN}c4 reset${RESET}                               Clear everything, start fresh
   ${CYAN}c4 watch <slot>${RESET}                        Watch & auto-receive tasks
@@ -1124,6 +1168,8 @@ ${BOLD}Quick Start:${RESET}
   ./c4.sh watch dev-1
 
 ${BOLD}Examples:${RESET}
+  ./c4.sh init leader                           # Output leader prompt to copy
+  ./c4.sh init dev-1                           # Output dev-1 prompt to copy
   ./c4.sh register leader \"Claude\" \"Claude Code\"
   ./c4.sh register dev-1  \"Copilot\" \"GitHub Copilot\"
   ./c4.sh watch dev-1
@@ -1202,6 +1248,7 @@ case "$CMD" in
   register) cmd_register "$@" ;;
   release)  cmd_release "$@" ;;
   reset)    cmd_reset ;;
+  init)     cmd_init "$@" ;;
   watch)    cmd_watch "$@" ;;
   done)     cmd_done "$@" ;;
   help|--help|-h) cmd_help ;;
