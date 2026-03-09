@@ -1157,6 +1157,7 @@ ${BOLD}Commands:${RESET}
   ${CYAN}c4 reset${RESET}                               Clear everything, start fresh
   ${CYAN}c4 watch <slot>${RESET}                        Watch & auto-receive tasks
   ${CYAN}c4 done <slot> <task-id> \"summary\"${RESET}    Mark a task as completed
+  ${CYAN}c4 update${RESET}                              Check for C4 updates
 
 ${BOLD}Slots:${RESET} leader, dev-1, dev-2, dev-3
 
@@ -1170,6 +1171,7 @@ ${BOLD}Quick Start:${RESET}
 ${BOLD}Examples:${RESET}
   ./c4.sh init leader                           # Output leader prompt to copy
   ./c4.sh init dev-1                           # Output dev-1 prompt to copy
+  ./c4.sh update                               # Check for C4 updates
   ./c4.sh register leader \"Claude\" \"Claude Code\"
   ./c4.sh register dev-1  \"Copilot\" \"GitHub Copilot\"
   ./c4.sh watch dev-1
@@ -1238,6 +1240,53 @@ sync_roster() {
   rm -f "$tmp_table"
 }
 
+# ── cmd: update ───────────────────────────────────────────────────────────────
+cmd_update() {
+  local repo_url="https://github.com/rolniuq/c4.git"
+  local current_hash; current_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  
+  echo -e "\n${BOLD}🔄  C4 Update Checker${RESET}\n"
+  
+  # Check if this is a git repo
+  if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  Not a git repository. Cannot check for updates.${RESET}"
+    echo -e "   To use C4, clone the repo first:"
+    echo -e "   ${CYAN}git clone https://github.com/rolniuq/c4.git${RESET}"
+    return
+  fi
+  
+  # Check if remote exists
+  if ! git remote get-url origin > /dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  No remote configured. Cannot check for updates.${RESET}"
+    return
+  fi
+  
+  echo -e "   Current version: ${current_hash:0:7}"
+  echo -e "   Checking for updates...\n"
+  
+  # Fetch latest
+  git fetch origin main 2>/dev/null || true
+  local latest_hash; latest_hash=$(git rev-parse origin/main 2>/dev/null || echo "unknown")
+  
+  if [[ "$latest_hash" == "unknown" ]]; then
+    echo -e "${RED}✗ Could not fetch latest version${RESET}"
+    return
+  fi
+  
+  echo -e "   Latest version : ${latest_hash:0:7}"
+  
+  if [[ "$current_hash" == "$latest_hash" ]]; then
+    echo -e "\n${GREEN}✓ You are up to date!${RESET}\n"
+  else
+    echo -e "\n${YELLOW}⚠️  A new version is available!${RESET}"
+    echo -e "\n   Changes since your version:\n"
+    git log --oneline "${current_hash}..${latest_hash}" 2>/dev/null | head -5 || true
+    echo ""
+    echo -e "   ${BOLD}To update, run:${RESET}"
+    echo -e "   ${CYAN}git pull origin main${RESET}\n"
+  fi
+}
+
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 CMD="${1:-help}"
 shift 2>/dev/null || true
@@ -1251,6 +1300,7 @@ case "$CMD" in
   init)     cmd_init "$@" ;;
   watch)    cmd_watch "$@" ;;
   done)     cmd_done "$@" ;;
+  update)   cmd_update "$@" ;;
   help|--help|-h) cmd_help ;;
   *) echo -e "${RED}Unknown command: ${CMD}${RESET}"; cmd_help; exit 1 ;;
 esac
