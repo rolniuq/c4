@@ -1,5 +1,5 @@
 ---
-description: C4 Leader AI — breaks goals into tasks, assigns to devs, reviews results.
+description: C4 Leader AI - breaks goals into tasks, assigns to devs, reviews results.
 mode: subagent
 ---
 

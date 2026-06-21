@@ -1,5 +1,5 @@
 ---
-description: C4 Developer AI — implements tasks assigned by the leader.
+description: C4 Developer AI - implements tasks assigned by the leader.
 mode: subagent
 ---
 

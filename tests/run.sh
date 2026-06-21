@@ -62,9 +62,9 @@ while IFS= read -r md_file; do
   awk '/^---/{f++; next} f==1 && /^description:/{found=1} f==2{exit} END{exit !found}' "$md_file" \
     && ok "$rel: has description" || fail "$rel: missing description in frontmatter"
 
-  # No emoji in description field
+  # No emoji in description field (check for non-ASCII bytes)
   desc_line=$(awk '/^---/{f++; next} f==1 && /^description:/{print; exit}' "$md_file")
-  if echo "$desc_line" | grep -qP '[^\x00-\x7F]'; then
+  if echo "$desc_line" | LC_ALL=C grep -q '[^[:print:][:space:]]'; then
     fail "$rel: description contains non-ASCII characters (may confuse AI parsers)"
   else
     ok "$rel: description is ASCII-only"
@@ -94,12 +94,9 @@ TMPDIR=$(mktemp -d /tmp/c4-test-XXXX)
 # Test install
 "$ROOT/c4.sh" install "$TMPDIR" >/dev/null 2>&1 && ok "install: exits 0" || fail "install: non-zero exit"
 assert_file "$TMPDIR/c4.sh" "install: c4.sh copied"
-assert_file "$TMPDIR/.c4/leader/inbox/.gitkeep" "install: leader/inbox exists" || true
+[[ -d "$TMPDIR/.c4/leader/inbox" ]] && ok "install: leader/inbox exists" || fail "install: leader/inbox missing"
 assert_file "$TMPDIR/.c4/AGENTS.md" "install: AGENTS.md created"
 
-# Test register
-"$ROOT/c4.sh" register leader "TestBot" "CLI" 2>&1 | head -1 || true
-# shellcheck disable=SC1090
 cd "$TMPDIR"
 "$TMPDIR/c4.sh" register leader "TestBot" "CLI" >/dev/null 2>&1 && ok "register: exits 0" || fail "register: non-zero exit"
 assert_contains "$TMPDIR/.c4/leader/PROFILE.md" "claimed_by: TestBot" "register: PROFILE.md updated"
@@ -142,7 +139,6 @@ if command -v npx &>/dev/null && npx --yes tsc --version &>/dev/null 2>&1; then
   npx tsc --noEmit --strict --moduleResolution bundler "$ROOT/.opencode/plugins/c4-plugin.ts" 2>&1 | \
     grep -v "node_modules" | grep -v "@opencode-ai/plugin" | grep -v "declaration" | grep -v "TS" || true
   # If only warnings about @opencode-ai/plugin, that's OK
-  local errors
   errors=$(npx tsc --noEmit --strict --moduleResolution bundler "$ROOT/.opencode/plugins/c4-plugin.ts" 2>&1 | grep -v "@opencode-ai/plugin" | grep -v "node_modules" | grep -v "TS" || true)
   if [[ -z "$errors" ]]; then
     ok "plugin: TypeScript OK"
@@ -176,9 +172,11 @@ grep -q 'type: "review"' "$ROOT/.opencode/agents/c4-leader.md" \
 grep -q "Implement the task" "$ROOT/.opencode/agents/c4-dev.md" \
   && ok "dev: has implement instructions" || fail "dev: missing implement instructions"
 
-# Dev: must output done report JSON
-grep -q "taskId.*summary.*files.*verification" "$ROOT/.opencode/agents/c4-dev.md" \
-  && ok "dev: output includes all required fields" || fail "dev: output missing required fields"
+# Dev: must output done report JSON with required fields
+for field in taskId summary files verification; do
+  grep -q "\"$field\"" "$ROOT/.opencode/agents/c4-dev.md" \
+    && ok "dev: output has $field" || fail "dev: output missing $field"
+done
 
 # ── 6. Command validation ──────────────────────────────────────────────────
 header "Command Validation"
@@ -231,7 +229,7 @@ else
 fi
 
 # No TODO/FIXME/HACK comments in code (allow in docs)
-todo_count=$(grep -rn "TODO\|FIXME\|HACK" "$ROOT/c4.sh" "$ROOT/.opencode" 2>/dev/null | grep -v "AGENTS.md" | grep -v "\.md:" | wc -l | tr -d ' ')
+todo_count=$(grep -rn "TODO\|FIXME\|HACK" "$ROOT/c4.sh" "$ROOT/.opencode" 2>/dev/null | grep -v "AGENTS.md" | grep -v "\.md:" | wc -l | tr -d ' ' || true)
 [[ "$todo_count" -eq 0 ]] && ok "no TODO/FIXME/HACK in code" \
   || fail "found $todo_count TODO/FIXME/HACK in code (docs excluded)"
 
@@ -239,8 +237,9 @@ todo_count=$(grep -rn "TODO\|FIXME\|HACK" "$ROOT/c4.sh" "$ROOT/.opencode" 2>/dev
 for agent_file in "$ROOT/.opencode/agents/"*.md; do
   [[ -f "$agent_file" ]] || continue
   name=$(basename "$agent_file" .md)
-  awk '/^---/{f++; next} f==1 && /^mode:/{print; exit}' "$agent_file" | grep -q "subagent" \
-    && ok "$name: mode is subagent" || fail "$name: mode must be subagent"
+  mode_value=$(awk '/^---/{f++; next} f==1 && /^mode:/{print $2; exit}' "$agent_file")
+  [[ "$mode_value" == "subagent" ]] && ok "$name: mode is subagent" \
+    || fail "$name: mode must be subagent (got: ${mode_value:-none})"
 done
 
 # ── Results ─────────────────────────────────────────────────────────────────

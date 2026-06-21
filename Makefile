@@ -7,7 +7,6 @@
 #   make precommit  Run everything required before DONE/commit
 
 SHELL := /usr/bin/env bash
-.ONESHELL:
 
 .PHONY: test lint clean precommit
 
@@ -31,18 +30,7 @@ lint:
 	@bash -n c4.sh && echo "  ✓ c4.sh syntax OK"
 
 	@echo "==> Checking .opencode/ files exist..."
-	@for f in \
-		.opencode/agents/c4-leader.md \
-		.opencode/agents/c4-dev.md \
-		.opencode/commands/c4.md \
-		.opencode/plugins/c4-plugin.ts; do
-		if [[ -f "$$f" ]]; then
-			echo "  ✓ $$f"
-		else
-			echo "  ✗ MISSING: $$f"
-			exit 1
-		fi
-	done
+	@for f in .opencode/agents/c4-leader.md .opencode/agents/c4-dev.md .opencode/commands/c4.md .opencode/plugins/c4-plugin.ts; do if [ -f "$$f" ]; then echo "  ✓ $$f"; else echo "  ✗ MISSING: $$f"; exit 1; fi; done
 
 	@echo "==> Linting passed."
 
@@ -55,7 +43,3 @@ clean:
 
 # ── Pre-commit (gate for DONE claim) ────────────────────────────────────────
 precommit: clean lint test
-	@echo ""
-	@echo "═══════════════════════════════════════"
-	@echo "  ✅ All checks passed. Safe to DONE."
-	@echo "═══════════════════════════════════════"

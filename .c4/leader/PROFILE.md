@@ -1,10 +1,10 @@
 ---
 type: registration
 slot: leader
-claimed_by: _empty_
-tool: _empty_
-joined_at: ~
-status: available
+claimed_by: TestBot
+tool: CLI
+joined_at: 2026-06-21T05:50:10Z
+status: active
 ---
 
 # Leader Agent Profile
