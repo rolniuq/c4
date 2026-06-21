@@ -67,3 +67,37 @@ C4 installs into any project (Go, Python, Node, Rust — any language) and enabl
 - Keep zero-dependency — no npm, no pip, no brew
 - When editing `.c4/` templates, remember they'll be read by AI agents (Claude, Copilot, etc.) — keep instructions clear and unambiguous
 - If adding a new command, add it to `cmd_help()` and the `case` dispatch at the bottom
+
+## DONE Protocol — MUST Follow Before Claiming Completion
+
+**Before saying DONE on any change, you MUST run this gate:**
+
+```bash
+make precommit
+```
+
+This runs (in order):
+1. **`make clean`** — removes `.tmp`, `.cache`, `.turbo`, `dist/`, `build/`, `out/`
+2. **`make lint`** — validates bash syntax, checks all expected files exist
+3. **`make test`** — runs `tests/run.sh` (frontmatter validation, command sandbox tests, plugin validation, pattern enforcement)
+
+### Gate Rules
+
+- `make precommit` must exit **0** (all passed). If not, fix the failures.
+- **No `TODO` / `FIXME` / `HACK`** in any code file (docs are exempt).
+- **No build artifacts** (`.tmp`, `dist/`, `build/`, `out/`, `.turbo/`) committed.
+- **No emoji/non-ASCII** in frontmatter `description` fields (may confuse AI parsers).
+- **All `.opencode/agents/*.md` must have `mode: subagent`** in frontmatter.
+- **Plugin tools** (`c4_init`, `c4_validate_plan`, `c4_validate_report`, `c4_log`) must all be present.
+- **c4.sh functions** must follow `cmd_<name>()`, `fm_*()`, `sync_*()`, or `watch_*()` naming.
+- **Pre-commit hook** installed via `git config core.hooksPath .githooks`.
+
+### Sanity Check
+
+```bash
+# Quick check without full suite
+bash -n c4.sh                           # syntax
+grep -r "TODO\|FIXME\|HACK" c4.sh .opencode/  # no debt markers
+make clean                              # no artifacts
+make test                               # full suite
+```
