@@ -1,5 +1,10 @@
 # C4 — Multi-Agent AI Plugin
 
+[![CI](https://github.com/rolniuq/c4/actions/workflows/ci.yml/badge.svg)](https://github.com/rolniuq/c4/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bash](https://img.shields.io/badge/language-bash-4EAA25.svg)](https://www.gnu.org/software/bash/)
+[![OpenCode](https://img.shields.io/badge/opencode-plugin-6C47FF.svg)](https://opencode.ai)
+
 > A file-system-based AI team plugin. Drop `.c4/` + `c4.sh` into any project and get a self-organizing team of AI agents: 1 Leader + 3 Developers.
 
 **Zero dependencies. Pure bash. Works with Go, Python, Node, Rust — any project.**

@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate bash syntax
+        run: bash -n c4.sh
+
+      - name: Check required files exist
+        run: |
+          for f in \
+            c4.sh \
+            .opencode/agents/c4-leader.md \
+            .opencode/agents/c4-dev.md \
+            .opencode/commands/c4.md \
+            .opencode/plugins/c4-plugin.ts \
+            AGENTS.md \
+            Makefile \
+            tests/run.sh; do
+            if [ -f "$f" ]; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Validate agent frontmatter
+        run: |
+          for f in .opencode/agents/*.md; do
+            name=$(basename "$f")
+            head -1 "$f" | grep -q "^---" || { echo "✗ $name: missing opening ---"; exit 1; }
+            grep -q "^mode: subagent" "$f" || { echo "✗ $name: must have mode: subagent"; exit 1; }
+            echo "  ✓ $name"
+          done
+
+      - name: Validate plugin structure
+        run: |
+          grep -q "export default" .opencode/plugins/c4-plugin.ts || { echo "✗ plugin missing export default"; exit 1; }
+          for tool in c4_init c4_validate_plan c4_validate_report c4_log; do
+            grep -q "${tool}:" .opencode/plugins/c4-plugin.ts && echo "  ✓ $tool" || { echo "✗ plugin missing $tool"; exit 1; }
+          done
+
+      - name: Validate command structure
+        run: |
+          grep -q '\$ARGUMENTS' .opencode/commands/c4.md || { echo "✗ command missing \$ARGUMENTS"; exit 1; }
+          grep -q 'description:' .opencode/commands/c4.md || { echo "✗ command missing description"; exit 1; }
+
+      - name: Check for TODO/FIXME/HACK in code
+        run: |
+          ! grep -rn "TODO\|FIXME\|HACK" c4.sh .opencode/ --include="*.ts" --include="*.sh" 2>/dev/null \
+            || { echo "✗ Found TODO/FIXME/HACK in code"; exit 1; }
+          echo "  ✓ No code debt markers"
+
+  test:
+    name: Test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: bash tests/run.sh
+
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run plugin unit tests
+        run: bun test tests/plugin_test.ts
+        continue-on-error: true
