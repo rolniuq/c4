@@ -1,5 +1,10 @@
 # C4 — Multi-Agent AI Plugin
 
+[![CI](https://github.com/rolniuq/c4/actions/workflows/ci.yml/badge.svg)](https://github.com/rolniuq/c4/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bash](https://img.shields.io/badge/language-bash-4EAA25.svg)](https://www.gnu.org/software/bash/)
+[![OpenCode](https://img.shields.io/badge/opencode-plugin-6C47FF.svg)](https://opencode.ai)
+
 > A file-system-based AI team plugin. Drop `.c4/` + `c4.sh` into any project and get a self-organizing team of AI agents: 1 Leader + 3 Developers.
 
 **Zero dependencies. Pure bash. Works with Go, Python, Node, Rust — any project.**
@@ -140,6 +145,60 @@ Read .c4/AGENTS.md, register as dev-1, then run: ./c4.sh watch dev-1
 When a task appears in your terminal, implement it, then run:
 ./c4.sh done dev-1 <task-id> "what you did"
 ```
+
+---
+
+## OpenCode Plugin
+
+C4 is also an **OpenCode plugin**. When you run OpenCode in a C4 project, you get the `/c4` command — a multi-agent team at your fingertips.
+
+### Quick Start (OpenCode)
+
+```bash
+# 1. Install C4 globally
+curl -fsSL https://raw.githubusercontent.com/rolniuq/c4/main/c4.sh | sudo tee /usr/local/bin/c4 > /dev/null && sudo chmod +x /usr/local/bin/c4
+
+# 2. Navigate to your project
+cd ~/your-project
+
+# 3. Install C4 (includes .opencode/ plugin)
+c4 install .
+
+# 4. Start OpenCode
+opencode
+
+# 5. Run any goal:
+/c4 implement a REST API with authentication
+```
+
+The `/c4` command spawns:
+1. **Leader subagent** — analyzes your goal, creates a task plan, assigns work
+2. **Dev subagent** — implements each task, reports back
+3. **Leader review** — reviews results, approves or requests revision
+
+All communication is event-driven via OpenCode's `task` tool — no filesystem polling, no race conditions.
+
+### Manual Plugin Setup
+
+If you already have C4 installed, enable the OpenCode plugin manually:
+
+```bash
+# Copy the OpenCode plugin into your project
+cp -r .opencode ~/your-project/.opencode
+```
+
+Or reference it from your project's `opencode.json`:
+
+```json
+{
+  "plugin": ["./path/to/c4/.opencode/plugins/c4-plugin.ts"]
+}
+```
+
+### Requirements
+
+- [OpenCode](https://opencode.ai) (latest version)
+- The C4 `.opencode/` directory in your project root
 
 ---
 

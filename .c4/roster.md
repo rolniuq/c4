@@ -11,7 +11,7 @@
 
 | Slot | Role | Claimed By | Tool | Joined At |
 | --- | --- | --- | --- | --- |
-| `leader` | 🧠 Leader — breaks goals into tasks, reviews results | _empty_ | _empty_ | — |
+| `leader` | 🧠 Leader — breaks goals into tasks, reviews results | **TestBot** | CLI | 2026-06-21T05:50:10 |
 | `dev-1` | 💻 Dev-1 — Backend specialist (APIs, auth, DB) | _empty_ | _empty_ | — |
 | `dev-2` | 🎨 Dev-2 — Frontend specialist (UI, components) | _empty_ | _empty_ | — |
 | `dev-3` | 🔧 Dev-3 — DevOps/Test specialist (CI, testing) | _empty_ | _empty_ | — |
