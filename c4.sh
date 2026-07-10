@@ -22,7 +22,7 @@ set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
 C4_DIR="${C4_DIR:-.c4}"
-VALID_SLOTS=("leader" "dev-1" "dev-2" "dev-3")
+VALID_SLOTS=("leader" "dev-1" "dev-2" "dev-3" "qa")
 WATCH_INTERVAL=2   # seconds between queue polls
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ cmd_roster() {
   done
 
   echo ""
-  echo -e "  ${taken}/4 slots filled\n"
+  echo -e "  ${taken}/${#VALID_SLOTS[@]} slots filled\n"
 }
 
 # ── cmd: register ─────────────────────────────────────────────────────────────
@@ -207,14 +207,14 @@ cmd_reset() {
   sync_roster
   ok "All profiles released"
 
-  # Clear dev queues
-  for dev in dev-1 dev-2 dev-3; do
-    local qdir="${C4_DIR}/${dev}/queue"
+  # Clear dev and QA queues
+  for slot in dev-1 dev-2 dev-3 qa; do
+    local qdir="${C4_DIR}/${slot}/queue"
     if [[ -d "$qdir" ]]; then
       find "$qdir" -name "*.md" -delete
     fi
   done
-  ok "All dev queues cleared"
+  ok "All dev & QA queues cleared"
 
   # Clear leader inbox/outbox (keep example-*.md files)
   for folder in inbox outbox; do
@@ -248,6 +248,8 @@ cmd_watch() {
 
   if [[ "$slot" == "leader" ]]; then
     watch_leader
+  elif [[ "$slot" == "qa" ]]; then
+    watch_qa
   else
     watch_dev "$slot"
   fi
@@ -278,12 +280,16 @@ watch_leader() {
       leader_process_goal "$f"
     done
 
-    # Check for new .done.md files in dev queues
+    # Check for new .done.md files in dev queues (QA-gated: only review QA-approved)
     for f in "${C4_DIR}"/dev-*/queue/*.done.md; do
       [[ -f "$f" ]] || continue
       grep -q "^$f$" "$done_seen" 2>/dev/null && continue
-      echo "$f" >> "$done_seen"
-      leader_review_done "$f"
+      local qa_status; qa_status=$(fm_get "$f" "qa_status")
+      if [[ "$qa_status" == "approved" ]]; then
+        echo "$f" >> "$done_seen"
+        leader_review_done "$f"
+      fi
+      # Not QA-approved yet? Skip and re-check next loop iteration
     done
 
     sleep "$WATCH_INTERVAL"
@@ -441,8 +447,8 @@ watch_dev() {
       print_task "$f" "$slot"
     done
 
-    # Check for revision files
-    for f in "${queue_dir}"/task-[0-9][0-9][0-9].revision.md; do
+    # Check for revision files (leader or QA)
+    for f in "${queue_dir}"/task-[0-9][0-9][0-9].revision.md "${queue_dir}"/task-[0-9][0-9][0-9].qa-revision.md; do
       [[ -f "$f" ]] || continue
       local rev_key="rev_${f}"
       grep -q "^${rev_key}$" "$seen_file" 2>/dev/null && continue
@@ -455,6 +461,92 @@ watch_dev() {
   done
 
   rm -f "$seen_file"
+}
+
+watch_qa() {
+  local seen_file="/tmp/c4_qa_seen_$$"
+  touch "$seen_file"
+
+  # Read agent name from profile
+  local agent_name="qa"
+  local profile="${C4_DIR}/qa/PROFILE.md"
+  if [[ -f "$profile" ]]; then
+    local n; n=$(fm_get "$profile" "claimed_by")
+    [[ -n "$n" && "$n" != "_empty_" ]] && agent_name="$n"
+  fi
+
+  echo -e "\n${BOLD}🔍  [qa] ${agent_name} is watching dev queues for testing...${RESET}"
+  echo -e "    Watching: dev-1/queue/, dev-2/queue/, dev-3/queue/"
+  echo -e "    When a .done.md appears, test it then:"
+  echo -e "    ${CYAN}→ Pass: fm_set task-XXX.done.md qa_status approved${RESET}"
+  echo -e "    ${CYAN}→ Fail: write task-XXX.qa-revision.md in dev's queue${RESET}\n"
+  echo "$(printf '%.0s─' {1..60})"
+
+  while true; do
+    for f in "${C4_DIR}"/dev-*/queue/*.done.md; do
+      [[ -f "$f" ]] || continue
+      grep -q "^$f$" "$seen_file" 2>/dev/null && continue
+
+      # Skip if QA already processed
+      local qa_status; qa_status=$(fm_get "$f" "qa_status")
+      [[ -n "$qa_status" && "$qa_status" != "pending" ]] && {
+        echo "$f" >> "$seen_file"
+        continue
+      }
+
+      echo "$f" >> "$seen_file"
+
+      # Claim for QA testing
+      fm_set "$f" "qa_status" "in_progress"
+      local task_id; task_id=$(basename "$f" .done.md)
+      log "qa" "📥 Claimed ${task_id} for testing"
+
+      # Print the done file for QA to review
+      print_qa_task "$f"
+    done
+
+    sleep "$WATCH_INTERVAL"
+  done
+
+  rm -f "$seen_file"
+}
+
+print_qa_task() {
+  local done_file="$1"
+  local dev; dev=$(echo "$done_file" | grep -oE 'dev-[0-9]+')
+  local task_id; task_id=$(basename "$done_file" .done.md)
+  local queue_dir; queue_dir=$(dirname "$done_file")
+  local task_file="${queue_dir}/${task_id}.md"
+  local border; border=$(printf '%.0s═' {1..60})
+
+  echo -e "\n${BLUE}╔${border}╗${RESET}"
+  echo -e "${BLUE}║${RESET}  ${BOLD}🔍 QA TEST REQUIRED — ${task_id} from ${dev}${RESET}"
+  echo -e "${BLUE}╠${border}╣${RESET}"
+  echo -e "${BLUE}║${RESET}  Task file: ${task_file}"
+  echo -e "${BLUE}║${RESET}  Done file: ${done_file}"
+  echo -e "${BLUE}╠${border}╣${RESET}"
+
+  # Show original task
+  if [[ -f "$task_file" ]]; then
+    echo -e "${BLUE}║${RESET}  ${BOLD}ORIGINAL TASK:${RESET}"
+    while IFS= read -r line; do
+      printf "${BLUE}║${RESET}  %-58s${BLUE}║${RESET}\n" "$line"
+    done <<< "$(fm_body "$task_file")"
+    echo -e "${BLUE}╠${border}╣${RESET}"
+  fi
+
+  # Show done file
+  echo -e "${BLUE}║${RESET}  ${BOLD}DEV DONE REPORT:${RESET}"
+  while IFS= read -r line; do
+    printf "${BLUE}║${RESET}  %-58s${BLUE}║${RESET}\n" "$line"
+  done <<< "$(fm_body "$done_file")"
+  echo -e "${BLUE}╠${border}╣${RESET}"
+
+  echo -e "${BLUE}║${RESET}  ${BOLD}ACTIONS:${RESET}"
+  echo -e "${BLUE}║${RESET}  ${CYAN}→ Pass: fm_set ${done_file} qa_status approved${RESET}"
+  echo -e "${BLUE}║${RESET}  ${CYAN}     && touch ${queue_dir}/${task_id}.qa-passed.md${RESET}"
+  echo -e "${BLUE}║${RESET}  ${CYAN}→ Fail: write ${queue_dir}/${task_id}.qa-revision.md${RESET}"
+  echo -e "${BLUE}╚${border}╝${RESET}\n"
 }
 
 print_task() {
@@ -525,6 +617,7 @@ task_id: ${task_id}
 completed_by: ${slot}
 completed_at: ${ts}
 review_status: pending_review
+qa_status: pending
 ---
 
 ## Done: ${title:-$task_id}
@@ -568,6 +661,7 @@ cmd_install() {
     "${c4_dir}/dev-1/queue" "${c4_dir}/dev-1/workspace" \
     "${c4_dir}/dev-2/queue" "${c4_dir}/dev-2/workspace" \
     "${c4_dir}/dev-3/queue" "${c4_dir}/dev-3/workspace" \
+    "${c4_dir}/qa/queue" "${c4_dir}/qa/workspace" \
     "${c4_dir}/_log"
   ok "Created .c4/ directory structure"
 
@@ -602,14 +696,15 @@ cmd_install() {
 
 ## 🧠 Who Are You?
 
-You are one of 4 AI agents in the **C4 system**:
+You are one of 5 AI agents in the **C4 system**:
 
 | Agent | Role | Watches |
 |---|---|---|
-| **Leader** | Breaks goals into tasks, routes them, reviews results | `leader/inbox/` and `dev-*/queue/*.done.md` |
+| **Leader** | Breaks goals into tasks, routes them, reviews results | `leader/inbox/` and `dev-*/queue/*.done.md` (QA-gated) |
 | **Dev-1** | Developer — picks up and implements tasks | `dev-1/queue/` |
 | **Dev-2** | Developer — picks up and implements tasks | `dev-2/queue/` |
 | **Dev-3** | Developer — picks up and implements tasks | `dev-3/queue/` |
+| **QA** | Tests everything devs produce, verifies quality | `dev-*/queue/*.done.md` |
 
 Read your `ROLE.md` to know which agent you are and what to do.
 
@@ -635,6 +730,11 @@ Read your `ROLE.md` to know which agent you are and what to do.
 ├── dev-2/ ...              ← Same structure
 ├── dev-3/ ...              ← Same structure
 │
+├── qa/
+│   ├── ROLE.md             ← QA behavior rules
+│   ├── queue/              ← QA signs off or requests revision here
+│   └── workspace/          ← QA scratchpad
+│
 └── _log/
     └── events.md           ← Append-only log of all agent actions
 ```
@@ -648,8 +748,9 @@ Read your `ROLE.md` to know which agent you are and what to do.
 2. Leader reads goal → splits into tasks → writes task-XXX.md into dev-X/queue/
 3. Dev AI detects new file in queue/ → updates status: in_progress → implements
 4. Dev AI writes result → creates task-XXX.done.md in same queue/
-5. Leader detects *.done.md → reviews → marks done OR writes task-XXX.revision.md
-6. Loop until all tasks complete
+5. QA detects *.done.md → tests → sets qa_status: approved OR creates task-XXX.qa-revision.md
+6. Dev addresses QA feedback → updates .done.md → loop until QA approves
+7. Leader detects QA-approved *.done.md → final review → approves project
 ```
 
 ---
@@ -681,7 +782,9 @@ What needs to be done.
 Any extra context.
 ```
 
-**Status flow:** `pending` → `in_progress` → `done` → (if issues) → `needs_revision` → `in_progress` ...
+**Status flow:** `pending` → `in_progress` → `done` → QA tests → `qa_status: approved` / `qa_status: failed` → (if failed) → dev revises → `in_progress` → `done` → QA re-tests ...
+
+**QA status flow in done files:** `pending` → `in_progress` → `approved` | `failed`
 
 ---
 
@@ -732,10 +835,11 @@ CONFIG_EOF
 
 | Slot | Role | Claimed By | Tool | Joined At |
 | --- | --- | --- | --- | --- |
-| `leader` | 🧠 Leader — breaks goals into tasks, reviews results | _empty_ | _empty_ | — |
-| `dev-1` | 💻 Dev-1 — Backend specialist (APIs, auth, DB) | _empty_ | _empty_ | — |
-| `dev-2` | 🎨 Dev-2 — Frontend specialist (UI, components) | _empty_ | _empty_ | — |
-| `dev-3` | 🔧 Dev-3 — DevOps/Test specialist (CI, testing) | _empty_ | _empty_ | — |
+| \`leader\` | 🧠 Leader — breaks goals into tasks, reviews results | _empty_ | _empty_ | — |
+| \`dev-1\` | 💻 Dev-1 — Backend specialist (APIs, auth, DB) | _empty_ | _empty_ | — |
+| \`dev-2\` | 🎨 Dev-2 — Frontend specialist (UI, components) | _empty_ | _empty_ | — |
+| \`dev-3\` | 🔧 Dev-3 — DevOps/Test specialist (CI, testing) | _empty_ | _empty_ | — |
+| \`qa\` | 🔍 QA — Tests all dev work, verifies quality | _empty_ | _empty_ | — |
 
 ---
 
@@ -772,10 +876,17 @@ You are the **project manager**. The human will talk to you directly to set goal
 - Implement frontend features: UI, components, styles
 - **Start here**: read `.c4/dev-2/ROLE.md`
 
-### 🔧 Dev-3 (`dev-3`) — DevOps/Test
-- Watch `.c4/dev-3/queue/` for task files
+### 🔧 Dev-3 (\`dev-3\`) — DevOps/Test
+- Watch \`.c4/dev-3/queue/\` for task files
 - Write tests, set up CI/CD, handle infrastructure
-- **Start here**: read `.c4/dev-3/ROLE.md`
+- **Start here**: read \`.c4/dev-3/ROLE.md\`
+
+### 🔍 QA (\`qa\`) — Quality Assurance
+- Watch ALL dev queues (\`dev-1/\`, \`dev-2/\`, \`dev-3/\`) for \`.done.md\` files
+- Test everything devs produce — check acceptance criteria, find bugs
+- Pass: set \`qa_status: approved\` — Fail: write \`.qa-revision.md\` back to dev
+- Communicate with devs in a loop until quality is confirmed
+- **Start here**: read \`.c4/qa/ROLE.md\`
 ROSTER_EOF
 
   # ── events.md ─────────────────────────────────────────────────────────────
@@ -787,6 +898,90 @@ ROSTER_EOF
 ---
 
 EVENTS_EOF
+
+  # ── qa/ROLE.md ────────────────────────────────────────────────────────────
+  cat > "${c4_dir}/qa/ROLE.md" << 'QA_ROLE_EOF'
+# QA Agent — ROLE.md
+
+## Identity
+You are the **QA/Tester AI** of the C4 system.
+You are a **senior quality assurance engineer** who tests everything developers produce.
+
+## Your Role in the Flow
+```
+Dev → creates task-XXX.done.md → QA tests → QA passes → Leader final review
+```
+
+## Responsibilities
+
+### 1. Test Watching (`dev-*/queue/*.done.md`)
+You watch ALL dev queues (dev-1, dev-2, dev-3) for completed tasks.
+
+When a new `task-XXX.done.md` appears with `qa_status: pending`:
+1. Read the original `task-XXX.md` and the `.done.md` result
+2. Read any source files mentioned in the done report
+3. **Test everything** — check acceptance criteria, run the code, look for bugs, edge cases
+4. Set `qa_status:` in the done file:
+   - If tests **PASS**: set `qa_status: approved`, then create `task-XXX.qa-passed.md` in the dev's queue
+   - If tests **FAIL**: set `qa_status: failed`, then create `task-XXX.qa-revision.md` in the dev's queue with:
+     - Exact error messages and steps to reproduce
+     - Expected vs actual behavior
+     - Specific files/lines that need fixing
+5. Log everything to `_log/events.md`
+
+### 2. Re-Testing (`dev-*/queue/*.done.md` updated)
+When a dev updates their `.done.md` after a QA revision:
+- Re-read the task, check what changed
+- Re-test everything
+- Either approve or request another revision
+- Loop until all issues are resolved
+
+## Working Rules
+- Test ALL dev queues, not just one
+- Be thorough and specific in bug reports — vague feedback helps no one
+- Include reproduction steps in every failed test report
+- When in doubt, ask the dev for clarification via the revision file
+- Once QA-approved, the Leader does the final project review
+
+## Communication Style
+- Be precise: "Line 42 of auth.go returns 500 when token is expired"
+- Be constructive: suggest how to fix, not just what's broken
+- Be persistent: loop until quality meets the bar
+QA_ROLE_EOF
+
+  # ── qa/PROFILE.md ─────────────────────────────────────────────────────────
+  cat > "${c4_dir}/qa/PROFILE.md" << 'QA_PROFILE_EOF'
+---
+type: registration
+slot: qa
+claimed_by: _empty_
+tool: _empty_
+joined_at: ~
+status: available
+specialization: testing
+---
+
+# QA Agent Profile
+
+Fill in your details below when you claim this slot.
+
+## Identity
+- **Name / Handle**: _fill in your name_
+- **AI Tool**: _e.g. Claude Code, GitHub Copilot, Cursor_
+- **Instance**: _optional_
+
+## Specialization
+Quality Assurance: integration testing, boundary analysis, regression testing, bug hunting.
+
+## How to Claim
+Edit the frontmatter above:
+- `claimed_by:` → your name
+- `tool:` → your AI tool
+- `joined_at:` → current ISO timestamp
+- `status:` → `active`
+
+Then read your full ROLE.md: `.c4/qa/ROLE.md`
+QA_PROFILE_EOF
 
   # ── leader/ROLE.md ────────────────────────────────────────────────────────
   cat > "${c4_dir}/leader/ROLE.md" << 'LEADER_ROLE_EOF'
@@ -888,18 +1083,26 @@ When a new `task-XXX.md` appears in your queue:
 7. Update original task `status: done`
 8. Log completion to `_log/events.md`
 
-### Revision Watching (`dev-1/queue/*.revision.md`)
-When a `task-XXX.revision.md` appears:
+### Revision Watching (\`dev-1/queue/*.revision.md\`)
+When a \`task-XXX.revision.md\` appears:
 - Read the Leader's feedback carefully
 - Address every point raised
-- Update your `task-XXX.done.md` with the changes
-- Create a new `task-XXX.done-v2.md` (increment version each time)
+- Update your \`task-XXX.done.md\` with the changes
+- Create a new \`task-XXX.done-v2.md\` (increment version each time)
+
+### QA Revision Watching (\`dev-1/queue/*.qa-revision.md\`)
+When a \`task-XXX.qa-revision.md\` appears:
+- Read QA's test report carefully — they found bugs or missing requirements
+- Fix ALL issues mentioned (be specific: exact files, lines, error messages)
+- Update your \`task-XXX.done.md\` with the fixes
+- QA will re-test automatically — no need to notify them manually
+- Loop until QA sets \`qa_status: approved\`
 
 ## Working Rules
-- Work only on tasks assigned to `dev-1`
-- Use `dev-1/workspace/` as your scratchpad for notes and drafts
+- Work only on tasks assigned to \`dev-1\`
+- Use \`dev-1/workspace/\` as your scratchpad for notes and drafts
 - Always write real, working code — no placeholders
-- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+- If a task is unclear or blocked, set \`status: blocked\` and create \`task-XXX.blocked.md\`
 
 ## Specialization
 - Backend APIs, database design, authentication, infrastructure
@@ -963,17 +1166,25 @@ When a new `task-XXX.md` appears in your queue:
 7. Update original task `status: done`
 8. Log completion to `_log/events.md`
 
-### Revision Watching (`dev-2/queue/*.revision.md`)
-When a `task-XXX.revision.md` appears:
+### Revision Watching (\`dev-2/queue/*.revision.md\`)
+When a \`task-XXX.revision.md\` appears:
 - Read the Leader's feedback carefully
 - Address every point raised
-- Create a new `task-XXX.done-v2.md` (increment version each time)
+- Create a new \`task-XXX.done-v2.md\` (increment version each time)
+
+### QA Revision Watching (\`dev-2/queue/*.qa-revision.md\`)
+When a \`task-XXX.qa-revision.md\` appears:
+- Read QA's test report carefully — they found bugs or missing requirements
+- Fix ALL issues mentioned (be specific: exact files, lines, error messages)
+- Update your \`task-XXX.done.md\` with the fixes
+- QA will re-test automatically — no need to notify them manually
+- Loop until QA sets \`qa_status: approved\`
 
 ## Working Rules
-- Work only on tasks assigned to `dev-2`
-- Use `dev-2/workspace/` as your scratchpad for notes and drafts
+- Work only on tasks assigned to \`dev-2\`
+- Use \`dev-2/workspace/\` as your scratchpad for notes and drafts
 - Always write real, working code — no placeholders
-- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+- If a task is unclear or blocked, set \`status: blocked\` and create \`task-XXX.blocked.md\`
 
 ## Specialization
 - Frontend React/Vue/Next.js, CSS, component libraries, accessibility, animations
@@ -1037,17 +1248,25 @@ When a new `task-XXX.md` appears in your queue:
 7. Update original task `status: done`
 8. Log completion to `_log/events.md`
 
-### Revision Watching (`dev-3/queue/*.revision.md`)
-When a `task-XXX.revision.md` appears:
+### Revision Watching (\`dev-3/queue/*.revision.md\`)
+When a \`task-XXX.revision.md\` appears:
 - Read the Leader's feedback carefully
 - Address every point raised
-- Create a new `task-XXX.done-v2.md` (increment version each time)
+- Create a new \`task-XXX.done-v2.md\` (increment version each time)
+
+### QA Revision Watching (\`dev-3/queue/*.qa-revision.md\`)
+When a \`task-XXX.qa-revision.md\` appears:
+- Read QA's test report carefully — they found bugs or missing requirements
+- Fix ALL issues mentioned (be specific: exact files, lines, error messages)
+- Update your \`task-XXX.done.md\` with the fixes
+- QA will re-test automatically — no need to notify them manually
+- Loop until QA sets \`qa_status: approved\`
 
 ## Working Rules
-- Work only on tasks assigned to `dev-3`
-- Use `dev-3/workspace/` as your scratchpad for notes and drafts
+- Work only on tasks assigned to \`dev-3\`
+- Use \`dev-3/workspace/\` as your scratchpad for notes and drafts
 - Always write real, working code — no placeholders
-- If a task is unclear or blocked, set `status: blocked` and create `task-XXX.blocked.md`
+- If a task is unclear or blocked, set \`status: blocked\` and create \`task-XXX.blocked.md\`
 
 ## Specialization
 - Testing (unit, integration, e2e), CI/CD pipelines, Docker, monitoring, performance
@@ -1095,8 +1314,10 @@ DEV3_PROFILE_EOF
   echo -e "   ${CYAN}cd ${target}${RESET}"
   echo -e "   ${CYAN}./c4.sh register leader \"Claude\" \"Claude Code\"${RESET}"
   echo -e "   ${CYAN}./c4.sh register dev-1  \"Copilot\" \"GitHub Copilot\"${RESET}"
+  echo -e "   ${CYAN}./c4.sh register qa     \"Verifier\" \"Code Review AI\"${RESET}"
   echo -e "   ${CYAN}./c4.sh watch leader${RESET}   ${DIM}# in a terminal${RESET}"
-  echo -e "   ${CYAN}./c4.sh watch dev-1${RESET}    ${DIM}# in another terminal${RESET}\n"
+  echo -e "   ${CYAN}./c4.sh watch dev-1${RESET}    ${DIM}# in another terminal${RESET}"
+  echo -e "   ${CYAN}./c4.sh watch qa${RESET}       ${DIM}# in a third terminal${RESET}\n"
 }
 
 # ── cmd: init ─────────────────────────────────────────────────────────────────
@@ -1154,12 +1375,13 @@ ${BOLD}Commands:${RESET}
   ${CYAN}c4 register <slot> <name> <tool>${RESET}       Claim a role slot
   ${CYAN}c4 init <slot>${RESET}                         Output role prompt (copy to AI assistant)
   ${CYAN}c4 release <slot>${RESET}                      Free up a slot
+  ${CYAN}c4 watch qa${RESET}                               Watch dev queues for testing
   ${CYAN}c4 reset${RESET}                               Clear everything, start fresh
   ${CYAN}c4 watch <slot>${RESET}                        Watch & auto-receive tasks
   ${CYAN}c4 done <slot> <task-id> \"summary\"${RESET}    Mark a task as completed
   ${CYAN}c4 update${RESET}                              Check for C4 updates
 
-${BOLD}Slots:${RESET} leader, dev-1, dev-2, dev-3
+${BOLD}Slots:${RESET} leader, dev-1, dev-2, dev-3, qa
 
 ${BOLD}Quick Start:${RESET}
   sudo cp c4.sh /usr/local/bin/c4
@@ -1191,6 +1413,7 @@ sync_roster() {
     "dev-1|💻 Dev-1 — Backend specialist (APIs, auth, DB)"
     "dev-2|🎨 Dev-2 — Frontend specialist (UI, components)"
     "dev-3|🔧 Dev-3 — DevOps/Test specialist (CI, testing)"
+    "qa|🔍 QA — Tests all dev work, verifies quality"
   )
 
   # Write new table to temp file

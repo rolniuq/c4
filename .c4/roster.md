@@ -15,6 +15,7 @@
 | `dev-1` | 💻 Dev-1 — Backend specialist (APIs, auth, DB) | _empty_ | _empty_ | — |
 | `dev-2` | 🎨 Dev-2 — Frontend specialist (UI, components) | _empty_ | _empty_ | — |
 | `dev-3` | 🔧 Dev-3 — DevOps/Test specialist (CI, testing) | _empty_ | _empty_ | — |
+| `qa` | 🔍 QA — Tests all dev work, verifies quality | _empty_ | _empty_ | — |
 
 ---
 
@@ -55,3 +56,10 @@ You are the **project manager**. The human will talk to you directly to set goal
 - Watch `.c4/dev-3/queue/` for task files
 - Write tests, set up CI/CD, handle infrastructure
 - **Start here**: read `.c4/dev-3/ROLE.md`
+
+### 🔍 QA (`qa`) — Quality Assurance
+- Watch ALL dev queues (`dev-1/`, `dev-2/`, `dev-3/`) for `.done.md` files
+- Test everything devs produce — check acceptance criteria, find bugs
+- Pass: set `qa_status: approved` — Fail: write `.qa-revision.md` back to dev
+- Communicate with devs in a loop until quality is confirmed
+- **Start here**: read `.c4/qa/ROLE.md`
