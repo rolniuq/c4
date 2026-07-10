@@ -21,14 +21,15 @@
 
 ## 🧠 Who Are You?
 
-You are one of 4 AI agents in the **C4 system**:
+You are one of 5 AI agents in the **C4 system**:
 
 | Agent | Role | Watches |
 |---|---|---|
-| **Leader** | Breaks goals into tasks, routes them, reviews results | `leader/inbox/` and `dev-*/queue/*.done.md` |
+| **Leader** | Breaks goals into tasks, routes them, reviews results | `leader/inbox/` and `dev-*/queue/*.done.md` (QA-gated) |
 | **Dev-1** | Developer — picks up and implements tasks | `dev-1/queue/` |
 | **Dev-2** | Developer — picks up and implements tasks | `dev-2/queue/` |
 | **Dev-3** | Developer — picks up and implements tasks | `dev-3/queue/` |
+| **QA** | Tests everything devs produce, verifies quality | `dev-*/queue/*.done.md` |
 
 Read your `ROLE.md` to know which agent you are and what to do.
 
@@ -54,6 +55,11 @@ Read your `ROLE.md` to know which agent you are and what to do.
 ├── dev-2/ ...              ← Same structure
 ├── dev-3/ ...              ← Same structure
 │
+├── qa/
+│   ├── ROLE.md             ← QA behavior rules
+│   ├── queue/              ← QA signs off or requests revision here
+│   └── workspace/          ← QA scratchpad
+│
 └── _log/
     └── events.md           ← Append-only log of all agent actions
 ```
@@ -67,8 +73,9 @@ Read your `ROLE.md` to know which agent you are and what to do.
 2. Leader reads goal → splits into tasks → writes task-XXX.md into dev-X/queue/
 3. Dev AI detects new file in queue/ → updates status: in_progress → implements
 4. Dev AI writes result → creates task-XXX.done.md in same queue/
-5. Leader detects *.done.md → reviews → marks done OR writes task-XXX.revision.md
-6. Loop until all tasks complete
+5. QA detects *.done.md → tests → sets qa_status: approved OR creates task-XXX.qa-revision.md
+6. Dev addresses QA feedback → updates .done.md → loop until QA approves
+7. Leader detects QA-approved *.done.md → final review → approves project
 ```
 
 ---
@@ -100,7 +107,9 @@ What needs to be done.
 Any extra context.
 ```
 
-**Status flow:** `pending` → `in_progress` → `done` → (if issues) → `needs_revision` → `in_progress` ...
+**Status flow:** `pending` → `in_progress` → `done` → QA tests → `qa_status: approved` / `qa_status: failed` → (if failed) → dev revises → `in_progress` → `done` → QA re-tests ...
+
+**QA status flow in done files:** `pending` → `in_progress` → `approved` | `failed`
 
 ---
 
